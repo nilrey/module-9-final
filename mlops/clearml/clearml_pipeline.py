@@ -140,7 +140,6 @@ def create_pipeline():
         name="CatBoost Hyperparameter Tuning",
         project="mlops",
         version="1.0.0",
-        docker="python:3.12",
         add_pipeline_tags=True
     )
     
@@ -174,7 +173,6 @@ def create_pipeline():
             endpoint_url="${pipeline.endpoint_url}"
         ),
         function_return=["X_train", "X_val", "y_train", "y_val"],
-        docker="python:3.12",
         packages=[
             "clearml[s3]==2.0.2",
             "pandas==2.2.2",
@@ -218,22 +216,6 @@ def create_pipeline():
         parents=["load_data"]
     )
     
-    # Experiment 3: depth=8, lr=0.03, iter=200
-    pipe.add_function_step(
-        name="train_exp3",
-        function=train_catboost,
-        function_kwargs=dict(
-            X_train="${load_data.X_train}",
-            y_train="${load_data.y_train}",
-            depth=8,
-            learning_rate=0.03,
-            iterations=200
-        ),
-        function_return=["model_exp3"],
-        packages=["catboost==1.2.8", "scikit-learn==1.5.1"],
-        parents=["load_data"]
-    )
-    
     # Evaluate Experiment 1
     pipe.add_function_step(
         name="evaluate_exp1",
@@ -264,21 +246,6 @@ def create_pipeline():
         parents=["train_exp2"]
     )
     
-    # Evaluate Experiment 3
-    pipe.add_function_step(
-        name="evaluate_exp3",
-        function=evaluate_model,
-        function_kwargs=dict(
-            model="${train_exp3.model_exp3}",
-            X_val="${load_data.X_val}",
-            y_val="${load_data.y_val}",
-            params={"depth": 8, "learning_rate": 0.03, "iterations": 200}
-        ),
-        function_return=["result_exp3"],
-        packages=["catboost==1.2.8", "scikit-learn==1.5.1"],
-        parents=["train_exp3"]
-    )
-    
     # Select and save best model
     pipe.add_function_step(
         name="select_best",
@@ -286,8 +253,7 @@ def create_pipeline():
         function_kwargs=dict(
             experiment_results=[
                 "${evaluate_exp1.result_exp1}",
-                "${evaluate_exp2.result_exp2}",
-                "${evaluate_exp3.result_exp3}"
+                "${evaluate_exp2.result_exp2}"
             ],
             bucket_name="${pipeline.bucket_name}",
             model_key="${pipeline.model_key}",
@@ -300,7 +266,7 @@ def create_pipeline():
             "joblib==1.5.2",
             "s3fs==2024.10.0"
         ],
-        parents=["evaluate_exp1", "evaluate_exp2", "evaluate_exp3"]
+        parents=["evaluate_exp1", "evaluate_exp2"]
     )
     
     return pipe
