@@ -1,0 +1,17 @@
+.idea
+.venv
+venv
+.gitkeep
+catboost_info
+# *.parquet
+# *.pkl
+__pycache__
+*.csv тоже надо добавить
+category_tree.csv
+.gitignore
+item_properties_part1.csv
+.gitignore
+events.csv
+.gitignore
+.gitignore
+item_properties_part2.csv
