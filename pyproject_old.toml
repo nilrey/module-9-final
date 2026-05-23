@@ -1,0 +1,17 @@
+# Заполни меня
+[project]
+name = ""
+version = "0.0.1"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = []
+
+[mypy]
+# что-то сюда добавить может быть?
+
+[ruff]
+# какие-то правила проверки тоже сюда может добавить?
+
+[pytest]
+# какие-то правила для тестов?

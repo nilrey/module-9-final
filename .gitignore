@@ -15,3 +15,7 @@ events.csv
 .gitignore
 .gitignore
 item_properties_part2.csv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+*.parquet

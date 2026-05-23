@@ -1,6 +1,7 @@
 import argparse
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
 def load_events(path: str) -> pd.DataFrame:

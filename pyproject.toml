@@ -1,17 +1,27 @@
-# Заполни меня
 [project]
-name = ""
+name = "ecom_recsys"
 version = "0.0.1"
-description = "Add your description here"
+description = "Retail recommendation system"
 readme = "README.md"
-requires-python = "==3.12.*"
-dependencies = []
+requires-python = ">=3.12"
 
-[mypy]
-# что-то сюда добавить может быть?
+[tool.ruff]
+line-length = 88
+target-version = "py312"
 
-[ruff]
-# какие-то правила проверки тоже сюда может добавить?
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
 
-[pytest]
-# какие-то правила для тестов?
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+allow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"

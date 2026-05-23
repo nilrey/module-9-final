@@ -1,8 +1,11 @@
 # Заполни меня правильно - тут основная логика сервиса.
 
 import logging
+
 from fastapi import FastAPI
-from loaded_models import ranker, item_features
+
+from loaded_models import item_features, ranker
+
 # Возможно надо еще импортировать prometheus, pydantic (схемы)
 # from schemas import PredictPurchaseRequest, PredictPurchaseResponse, ErrorResponse
 # from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
@@ -27,7 +30,7 @@ def health_check():
     """
     Проверка состояния сервиса и доступности моделей.
     """
-    from loaded_models import ranker, item_features
+    from loaded_models import item_features, ranker
 
     ok = {
         "ranker_loaded": ranker is not None,

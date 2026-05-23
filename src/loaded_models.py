@@ -1,7 +1,9 @@
 import pickle
-import pandas as pd
-from gensim.models import Word2Vec
+
+# from gensim.models import Word2Vec
 from pathlib import Path
+
+import pandas as pd
 
 # Локальная загрузка моделей (вам необходимо будет это сделать в финальном решении при помощи S3).
 with open(Path("./ranker.pkl"), "rb") as f:
