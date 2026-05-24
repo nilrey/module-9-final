@@ -199,9 +199,11 @@ def create_pipeline():
         function_return=["model_exp1"],
         packages=[
             "clearml[s3]==2.0.2",
-            "catboost==1.2.8", 
+            "pandas==2.2.2",
             "scikit-learn==1.5.1",
+            "catboost==1.2.8",
             "joblib==1.5.2",
+            "numpy==1.26.3",
             "s3fs==2024.10.0",
             "pyarrow==22.0.0"
         ],
@@ -222,9 +224,11 @@ def create_pipeline():
         function_return=["model_exp2"],
         packages=[
             "clearml[s3]==2.0.2",
-            "catboost==1.2.8", 
+            "pandas==2.2.2",
             "scikit-learn==1.5.1",
+            "catboost==1.2.8",
             "joblib==1.5.2",
+            "numpy==1.26.3",
             "s3fs==2024.10.0",
             "pyarrow==22.0.0"
         ],
@@ -244,9 +248,11 @@ def create_pipeline():
         function_return=["result_exp1"],
         packages=[
             "clearml[s3]==2.0.2",
-            "catboost==1.2.8", 
+            "pandas==2.2.2",
             "scikit-learn==1.5.1",
+            "catboost==1.2.8",
             "joblib==1.5.2",
+            "numpy==1.26.3",
             "s3fs==2024.10.0",
             "pyarrow==22.0.0"
         ],
@@ -266,9 +272,11 @@ def create_pipeline():
         function_return=["result_exp2"],
         packages=[
             "clearml[s3]==2.0.2",
-            "catboost==1.2.8", 
+            "pandas==2.2.2",
             "scikit-learn==1.5.1",
+            "catboost==1.2.8",
             "joblib==1.5.2",
+            "numpy==1.26.3",
             "s3fs==2024.10.0",
             "pyarrow==22.0.0"
         ],
@@ -291,9 +299,11 @@ def create_pipeline():
         function_return=["best_info"],
         packages=[
             "clearml[s3]==2.0.2",
-            "catboost==1.2.8", 
+            "pandas==2.2.2",
             "scikit-learn==1.5.1",
+            "catboost==1.2.8",
             "joblib==1.5.2",
+            "numpy==1.26.3",
             "s3fs==2024.10.0",
             "pyarrow==22.0.0"
         ],
