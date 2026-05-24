@@ -65,7 +65,6 @@ def train_catboost(
     
     return model
 
-
 # ============================================
 # STEP 3: EVALUATE MODEL
 # ============================================
@@ -83,24 +82,34 @@ def evaluate_model(model, X_val, y_val, params: dict):
     pr_auc = average_precision_score(y_val, y_pred_proba)
     print(f"PR-AUC = {pr_auc:.6f}")
     
+    # Создаем результат в виде словаря
+    result = {
+        "pr_auc": pr_auc,
+        "params": params
+    }
+    
     task = Task.current_task()
     if task:
         print("Reporting metrics to ClearML...")
         task.get_logger().report_scalar("metrics", "pr_auc", value=pr_auc, iteration=0)
         for param_name, param_value in params.items():
             task.get_logger().report_single_value(f"param_{param_name}", param_value)
+        
+        # Сохраняем результат как артефакт
+        print("Saving result as artifact...")
+        task.upload_artifact("evaluation_result", result)
+        print(f"Artifact saved with name: evaluation_result")
+        
+        # Возвращаем ID задачи  
+        print(f"Returning task ID: {task.id}")
+        print(f"=== evaluate_model END ===")
+        return task.id
     else:
         print("WARNING: No current ClearML task found")
-    
-    print(f"=== evaluate_model END ===")
-    
-    return {
-        "pr_auc": pr_auc,
-        "model": model,
-        "params": params
-    }
+        print(f"=== evaluate_model END ===")
 
-
+        return result
+    
 # ============================================
 # STEP 4: SELECT BEST MODEL
 # ============================================
@@ -113,7 +122,13 @@ def select_and_save_best_model(
 ):
     print(f"=== select_and_save_best_model START ===")
     print(f"Number of experiment results: {len(experiment_results)}")
-    
+
+    loaded_results = []
+    for task_id in experiment_results:
+        task = Task.get_task(task_id=task_id)
+        result = task.artifacts["evaluation_result"].get()
+        loaded_results.append(result)
+
     # Проверяем, что experiment_results содержит словари
     parsed_results = []
     for i, res in enumerate(experiment_results):
