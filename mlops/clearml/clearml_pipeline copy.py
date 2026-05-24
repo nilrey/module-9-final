@@ -16,15 +16,8 @@ def load_data(
     bucket_name: str,
     endpoint_url: str
 ):
-    print("=== load_data START ===")
-    print(f"train_data_path: {train_data_path}")
-    print(f"bucket_name: {bucket_name}")
-    print(f"endpoint_url: {endpoint_url}")
-    
     s3_url = f"s3://{bucket_name}/{train_data_path}"
-    print(f"Full S3 URL: {s3_url}")
     
-    print("Reading parquet from S3...")
     df = pd.read_parquet(
         s3_url,
         storage_options={
@@ -36,24 +29,16 @@ def load_data(
             }
         }
     )
-    print(f"DataFrame loaded: {df.shape[0]} rows, {df.shape[1]} cols")
     
     feature_cols = [
         "views", "purchases", "ctr", "hour", "weekday", "categoryid", "available"
     ]
-    print(f"Feature columns: {feature_cols}")
-    
     X = df[feature_cols].astype(float)
     y = df["target"].astype(int)
-    print(f"X shape: {X.shape}, y shape: {y.shape}")
-    print(f"Target distribution: {y.value_counts().to_dict()}")
     
-    print("Splitting train/val 80/20 with stratification...")
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
-    print(f"Train size: {len(X_train)}, Val size: {len(X_val)}")
-    print("=== load_data END ===")
     
     return X_train, X_val, y_train, y_val
 
@@ -67,25 +52,16 @@ def train_catboost(
     learning_rate: float,
     iterations: int
 ):
-    print(f"=== train_catboost START ===")
-    print(f"Params: depth={depth}, learning_rate={learning_rate}, iterations={iterations}")
-    print(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-    
-    print("Creating CatBoost model...")
     model = cb.CatBoostClassifier(
         depth=depth,
         learning_rate=learning_rate,
         iterations=iterations,
         loss_function="Logloss",
-        verbose=True,
+        verbose=False,
         random_seed=42
     )
     
-    print("Starting training...")
     model.fit(X_train, y_train)
-    print("Training completed")
-    print(f"=== train_catboost END ===")
-    
     return model
 
 
@@ -93,28 +69,16 @@ def train_catboost(
 # STEP 3: EVALUATE MODEL (PR-AUC)
 # ============================================
 def evaluate_model(model, X_val, y_val, params: dict):
-    print(f"=== evaluate_model START ===")
-    print(f"Params: {params}")
-    print(f"X_val shape: {X_val.shape}, y_val shape: {y_val.shape}")
-    
-    print("Getting prediction probabilities...")
     y_pred_proba = model.predict_proba(X_val)[:, 1]
-    print(f"Predictions ready, shape: {y_pred_proba.shape}")
-    
-    print("Calculating PR-AUC...")
     pr_auc = average_precision_score(y_val, y_pred_proba)
-    print(f"PR-AUC = {pr_auc:.6f}")
     
     task = Task.current_task()
     if task:
-        print("Reporting metrics to ClearML...")
-        task.get_logger().report_scalar("metrics", "pr_auc", value=pr_auc, iteration=0)
+        task.get_logger().report_scalar(
+            "metrics", "pr_auc", value=pr_auc, iteration=0
+        )
         for param_name, param_value in params.items():
             task.get_logger().report_single_value(f"param_{param_name}", param_value)
-    else:
-        print("WARNING: No current ClearML task found")
-    
-    print(f"=== evaluate_model END ===")
     
     return {
         "pr_auc": pr_auc,
@@ -132,58 +96,44 @@ def select_and_save_best_model(
     model_key: str,
     endpoint_url: str
 ):
-    print(f"=== select_and_save_best_model START ===")
-    print(f"Number of experiment results: {len(experiment_results)}")
-    for i, res in enumerate(experiment_results):
-        print(f"  Experiment {i+1}: PR-AUC = {res.get('pr_auc', 'N/A')}")
-    
-    print("Selecting best model by PR-AUC...")
     best_result = max(experiment_results, key=lambda x: x["pr_auc"])
     best_model = best_result["model"]
     best_pr_auc = best_result["pr_auc"]
     best_params = best_result["params"]
     
-    print(f"Best model PR-AUC = {best_pr_auc:.6f}")
+    print(f"Best model PR-AUC = {best_pr_auc:.4f}")
     print(f"Best params: {best_params}")
     
-    print(f"Connecting to S3 at {endpoint_url}...")
     fs = s3fs.S3FileSystem(
         client_kwargs={"endpoint_url": endpoint_url}
     )
     
     model_path = f"s3://{bucket_name}/{model_key}"
-    print(f"Saving model to {model_path}...")
     with fs.open(model_path, "wb") as f:
         joblib.dump(best_model, f)
-    print("Model saved to S3")
     
     task = Task.current_task()
-    if task:
-        print("Registering model in ClearML...")
-        output_model = OutputModel(
-            task=task,
-            framework="CatBoost",
-            name="catboost_ranker",
-            comment=f"Best model with PR-AUC = {best_pr_auc:.6f}",
-            tags=["best_model", "catboost"]
-        )
-        
-        temp_path = "/tmp/best_catboost_model.pkl"
-        print(f"Saving temp copy to {temp_path}...")
-        joblib.dump(best_model, temp_path, compress=True)
-        output_model.update_weights(temp_path)
-        os.remove(temp_path)
-        print(f"Model registered with ID: {output_model.id}")
-    else:
-        print("WARNING: No current ClearML task found, model not registered")
+    output_model = OutputModel(
+        task=task,
+        framework="CatBoost",
+        name="catboost_ranker",
+        comment=f"Best model with PR-AUC = {best_pr_auc:.4f}",
+        tags=["best_model", "catboost"]
+    )
     
-    print(f"=== select_and_save_best_model END ===")
+    temp_path = "/tmp/best_catboost_model.pkl"
+    joblib.dump(best_model, temp_path, compress=True)
+    output_model.update_weights(temp_path)
+    os.remove(temp_path)
+    
+    print(f"Model saved to S3: {model_path}")
+    print(f"Model registered in ClearML with ID: {output_model.id}")
     
     return {
         "best_pr_auc": best_pr_auc,
         "best_params": best_params,
         "s3_path": model_path,
-        "clearml_model_id": output_model.id if task else None
+        "clearml_model_id": output_model.id
     }
 
 
@@ -191,8 +141,6 @@ def select_and_save_best_model(
 # CREATE PIPELINE
 # ============================================
 def create_pipeline():
-    print("=== create_pipeline START ===")
-    
     pipe = PipelineController(
         name="CatBoost Hyperparameter Tuning",
         project="mlops",
@@ -201,7 +149,6 @@ def create_pipeline():
     )
     
     pipe.set_default_execution_queue(default_execution_queue="default")
-    print("Pipeline controller created, default queue set to 'default'")
     
     # Pipeline parameters
     pipe.add_parameter(
@@ -220,10 +167,8 @@ def create_pipeline():
         name="endpoint_url",
         default="https://storage.yandexcloud.net"
     )
-    print("Pipeline parameters added")
     
     # Step 1: Load data
-    print("Adding step: load_data")
     pipe.add_function_step(
         name="load_data",
         function=load_data,
@@ -245,8 +190,7 @@ def create_pipeline():
         ]
     )
     
-    # Experiment 1
-    print("Adding step: train_exp1")
+    # Experiment 1: depth=4, lr=0.1, iter=500
     pipe.add_function_step(
         name="train_exp1",
         function=train_catboost,
@@ -271,8 +215,7 @@ def create_pipeline():
         parents=["load_data"]
     )
     
-    # Experiment 2
-    print("Adding step: train_exp2")
+    # Experiment 2: depth=6, lr=0.05, iter=300
     pipe.add_function_step(
         name="train_exp2",
         function=train_catboost,
@@ -298,7 +241,6 @@ def create_pipeline():
     )
     
     # Evaluate Experiment 1
-    print("Adding step: evaluate_exp1")
     pipe.add_function_step(
         name="evaluate_exp1",
         function=evaluate_model,
@@ -323,7 +265,6 @@ def create_pipeline():
     )
     
     # Evaluate Experiment 2
-    print("Adding step: evaluate_exp2")
     pipe.add_function_step(
         name="evaluate_exp2",
         function=evaluate_model,
@@ -348,7 +289,6 @@ def create_pipeline():
     )
     
     # Select and save best model
-    print("Adding step: select_best")
     pipe.add_function_step(
         name="select_best",
         function=select_and_save_best_model,
@@ -375,7 +315,6 @@ def create_pipeline():
         parents=["evaluate_exp1", "evaluate_exp2"]
     )
     
-    print("=== create_pipeline END ===")
     return pipe
 
 
@@ -385,6 +324,5 @@ if __name__ == "__main__":
     print(f"  BUCKET_NAME: {os.environ.get('BUCKET_NAME', 'r-mlops-bucket-12-1-1-22209764')}")
     
     pipe = create_pipeline()
-    print("Starting pipeline...")
     pipe.start(queue="default")
     print("Pipeline submitted successfully")
