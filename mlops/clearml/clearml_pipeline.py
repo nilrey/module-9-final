@@ -11,44 +11,20 @@ import os
 # ============================================
 # STEP 1: LOAD DATA FROM S3
 # ============================================
-def load_data(
-    train_data_path: str,
-    bucket_name: str,
-    endpoint_url: str
-):
-    print("=== load_data START ===")
-    print(f"train_data_path: {train_data_path}")
-    print(f"bucket_name: {bucket_name}")
-    print(f"endpoint_url: {endpoint_url}")
+
+def load_data(train_data_path: str):
+    print(f"=== load_data START ===")
+    print(f"Local path: {train_data_path}")
     
-    s3_url = f"s3://{bucket_name}/{train_data_path}"
-    print(f"Full S3 URL: {s3_url}")
-    
-    print("Reading parquet from S3...")
-    df = pd.read_parquet(
-        s3_url,
-        storage_options={
-            'client_kwargs': {'endpoint_url': endpoint_url},
-            'config_kwargs': {
-                's3': {
-                    'addressing_style': 'path'
-                }
-            }
-        }
-    )
+    df = pd.read_parquet(train_data_path)
     print(f"DataFrame loaded: {df.shape[0]} rows, {df.shape[1]} cols")
     
     feature_cols = [
         "views", "purchases", "ctr", "hour", "weekday", "categoryid", "available"
     ]
-    print(f"Feature columns: {feature_cols}")
-    
     X = df[feature_cols].astype(float)
     y = df["target"].astype(int)
-    print(f"X shape: {X.shape}, y shape: {y.shape}")
-    print(f"Target distribution: {y.value_counts().to_dict()}")
     
-    print("Splitting train/val 80/20 with stratification...")
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
@@ -56,7 +32,6 @@ def load_data(
     print("=== load_data END ===")
     
     return X_train, X_val, y_train, y_val
-
 
 # ============================================
 # STEP 2: TRAIN CATBOOST WITH SPECIFIC PARAMS
@@ -223,28 +198,40 @@ def create_pipeline():
     print("Pipeline parameters added")
     
     # Step 1: Load data
+    
+    # print("Adding step: load_data")
+    # pipe.add_function_step(
+    #     name="load_data",
+    #     function=load_data,
+    #     function_kwargs=dict(
+    #         train_data_path="nil_project/processed_data/data_for_training.parquet",
+    #         bucket_name="r-mlops-bucket-12-1-1-22209764",
+    #         endpoint_url="https://storage.yandexcloud.net"
+    #     ),
+    #     function_return=["X_train", "X_val", "y_train", "y_val"],
+    #     packages=[
+    #         "clearml[s3]==2.0.2",
+    #         "pandas==2.2.2",
+    #         "scikit-learn==1.5.1",
+    #         "catboost==1.2.8",
+    #         "joblib==1.5.2",
+    #         "numpy==1.26.3",
+    #         "s3fs==2024.10.0",
+    #         "pyarrow==22.0.0"
+    #     ]
+    # )
     print("Adding step: load_data")
     pipe.add_function_step(
         name="load_data",
         function=load_data,
         function_kwargs=dict(
-            train_data_path="nil_project/processed_data/data_for_training.parquet",
-            bucket_name="r-mlops-bucket-12-1-1-22209764",
-            endpoint_url="https://storage.yandexcloud.net"
+            train_data_path="/opt/clearml_data/data_for_training.parquet"
         ),
         function_return=["X_train", "X_val", "y_train", "y_val"],
-        packages=[
-            "clearml[s3]==2.0.2",
-            "pandas==2.2.2",
-            "scikit-learn==1.5.1",
-            "catboost==1.2.8",
-            "joblib==1.5.2",
-            "numpy==1.26.3",
-            "s3fs==2024.10.0",
-            "pyarrow==22.0.0"
-        ]
-    )
-    
+        packages=["pandas==2.2.2", "scikit-learn==1.5.1", "numpy==1.26.3", "pyarrow==22.0.0"]
+    )    
+
+
     # Experiment 1
     print("Adding step: train_exp1")
     pipe.add_function_step(
@@ -357,9 +344,9 @@ def create_pipeline():
                 "${evaluate_exp1.result_exp1}",
                 "${evaluate_exp2.result_exp2}"
             ],
-            bucket_name="${pipeline.bucket_name}",
-            model_key="${pipeline.model_key}",
-            endpoint_url="${pipeline.endpoint_url}"
+            train_data_path="nil_project/processed_data/data_for_training.parquet",
+            bucket_name="r-mlops-bucket-12-1-1-22209764",
+            endpoint_url="https://storage.yandexcloud.net"
         ),
         function_return=["best_info"],
         packages=[

@@ -30,3 +30,27 @@ Preprocessing в контексте проекта — это этап, кото
     Airflow — подготовка данных (тяжёлые, однократные операции)
 
     ClearML — эксперименты и обучение (итеративно, много запусков)
+
+
+
+
+У нас есть data_for_training.parquet и item_features.parquet для чего item_features.parquet ?
+item_features.parquet нужен для инференса (работы сервиса), а не для обучения.
+
+В обучении (train_catboost) используются:
+
+    data_for_training.parquet — содержит признаки товаров + таргет
+
+В инференсе (FastAPI сервис):
+
+    item_features.parquet — загружается в loaded_models.py, чтобы по itemid получить признаки товара (views, purchases, ctr, categoryid, available)
+
+    ranker.pkl — модель
+
+Таким образом:
+
+    Airflow DAG создаёт оба файла
+
+    ClearML пайплайн использует только data_for_training.parquet
+
+    FastAPI сервис использует item_features.parquet + ranker.pkl
