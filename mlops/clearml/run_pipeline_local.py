@@ -112,19 +112,16 @@ def train_catboost(
     return model_path
 
 # ============================================
-# STEP 3: EVALUATE MODEL (исправленная)
+# STEP 3: EVALUATE MODEL (сохраняем в файл)
 # ============================================
 
-def evaluate_model(model_path, data_paths_json: str, params_json: str):
+def evaluate_model(model_path, data_paths_json: str, params_json: str, output_file: str = None):
     print(f"=== evaluate_model START ===")
     
     # Парсим пути к данным из JSON
     data_paths = json.loads(data_paths_json)
     X_path = data_paths["X_val_path"]
     y_path = data_paths["y_val_path"]
-    
-    print(f"X_path: {X_path}")
-    print(f"y_path: {y_path}")
     
     # Парсим параметры из JSON
     params = json.loads(params_json)
@@ -133,7 +130,6 @@ def evaluate_model(model_path, data_paths_json: str, params_json: str):
     # Загружаем данные
     X_val = np.load(X_path)
     y_val = np.load(y_path)
-    print(f"X_val shape: {X_val.shape}, y_val shape: {y_val.shape}")
     
     # Загружаем модель
     model = joblib.load(model_path)
@@ -148,6 +144,15 @@ def evaluate_model(model_path, data_paths_json: str, params_json: str):
         "params": params
     }
     
+    # Сохраняем результат во временный файл
+    if output_file is None:
+        temp_dir = tempfile.gettempdir()
+        output_file = os.path.join(temp_dir, f"result_{params['depth']}_{params['learning_rate']}.json")
+    
+    with open(output_file, "w") as f:
+        json.dump(result, f)
+    print(f"Result saved to: {output_file}")
+    
     task = Task.current_task()
     if task:
         task.get_logger().report_scalar("metrics", "pr_auc", value=pr_auc, iteration=0)
@@ -155,24 +160,32 @@ def evaluate_model(model_path, data_paths_json: str, params_json: str):
             task.get_logger().report_single_value(f"param_{param_name}", param_value)
     
     print(f"=== evaluate_model END ===")
-    return json.dumps(result)
+    return output_file  # возвращаем путь к файлу, а не JSON строку
 
 
 # ============================================
-# STEP 4: SELECT BEST MODEL
+# STEP 4: SELECT BEST MODEL (читаем из файлов)
 # ============================================
 
 def select_and_save_best_model(
-    experiment_results_json: str,
+    result_files_json: str,  # JSON массив путей к файлам
     bucket_name: str,
     model_key: str,
     endpoint_url: str
 ):
     print(f"=== select_and_save_best_model START ===")
     
-    # Парсим результаты экспериментов из JSON
-    experiment_results = json.loads(experiment_results_json)
-    print(f"Number of experiment results: {len(experiment_results)}")
+    # Парсим пути к файлам
+    result_files = json.loads(result_files_json)
+    print(f"Result files: {result_files}")
+    
+    # Загружаем результаты из файлов
+    experiment_results = []
+    for file_path in result_files:
+        with open(file_path, "r") as f:
+            result = json.load(f)
+            experiment_results.append(result)
+            print(f"Loaded result: PR-AUC = {result['pr_auc']:.6f}")
     
     # Выбираем лучшую модель по PR-AUC
     best_result = max(experiment_results, key=lambda x: x["pr_auc"])
@@ -194,14 +207,25 @@ def select_and_save_best_model(
         joblib.dump(best_model, f)
     print(f"Model saved to S3: {model_s3_path}")
     
+    # Очищаем временные файлы
+    for file_path in result_files:
+        try:
+            os.remove(file_path)
+            print(f"Cleaned up: {file_path}")
+        except:
+            pass
+    
+    print(f"=== select_and_save_best_model END ===")
+    
     return json.dumps({
         "best_pr_auc": best_pr_auc,
         "best_params": best_params,
         "s3_path": model_s3_path
     })
 
+
 # ============================================
-# PIPELINE CONTROLLER (исправленный)
+# PIPELINE CONTROLLER
 # ============================================
 
 pipe = PipelineController(
@@ -247,17 +271,18 @@ pipe.add_function_step(
     function_return=["model_path_exp2"]
 )
 
-# Шаг 3: Оценка моделей (ИСПРАВЛЕНО)
+# Шаг 3: Оценка моделей (возвращают пути к файлам)
 pipe.add_function_step(
     name="evaluate_exp1",
     function=evaluate_model,
     function_kwargs=dict(
         model_path="${train_exp1.model_path_exp1}",
-        data_paths_json="${load_data.data_paths_json}",  # передаем JSON строку
-        params_json='{"depth": 4, "learning_rate": 0.1, "iterations": 500}'
+        data_paths_json="${load_data.data_paths_json}",
+        params_json='{"depth": 4, "learning_rate": 0.1, "iterations": 500}',
+        output_file="/tmp/result_exp1.json"  # фиксированный путь
     ),
     parents=["train_exp1"],
-    function_return=["result_exp1"]
+    function_return=["result_file_exp1"]
 )
 
 pipe.add_function_step(
@@ -265,19 +290,20 @@ pipe.add_function_step(
     function=evaluate_model,
     function_kwargs=dict(
         model_path="${train_exp2.model_path_exp2}",
-        data_paths_json="${load_data.data_paths_json}",  # передаем JSON строку
-        params_json='{"depth": 6, "learning_rate": 0.05, "iterations": 300}'
+        data_paths_json="${load_data.data_paths_json}",
+        params_json='{"depth": 6, "learning_rate": 0.05, "iterations": 300}',
+        output_file="/tmp/result_exp2.json"  # фиксированный путь
     ),
     parents=["train_exp2"],
-    function_return=["result_exp2"]
+    function_return=["result_file_exp2"]
 )
 
-# Шаг 4: Выбор лучшей модели (ИСПРАВЛЕНО)
+# Шаг 4: Выбор лучшей модели (передаем пути как JSON)
 pipe.add_function_step(
     name="select_best",
     function=select_and_save_best_model,
     function_kwargs=dict(
-        experiment_results_json='[' + "${evaluate_exp1.result_exp1}" + ',' + "${evaluate_exp2.result_exp2}" + ']',
+        result_files_json='["/tmp/result_exp1.json", "/tmp/result_exp2.json"]',
         bucket_name="r-mlops-bucket-12-1-1-22209764",
         model_key="nil_project/models/ranker.pkl",
         endpoint_url="https://storage.yandexcloud.net"
