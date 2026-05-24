@@ -103,7 +103,11 @@ def evaluate_model(model, X_val, y_val, params: dict):
         # Возвращаем ID задачи  
         print(f"Returning task ID: {task.id}")
         print(f"=== evaluate_model END ===")
-        return task.id
+        return {
+            "pr_auc": pr_auc,
+            "params": params,
+            "model": model
+        }
     else:
         print("WARNING: No current ClearML task found")
         print(f"=== evaluate_model END ===")
@@ -123,11 +127,7 @@ def select_and_save_best_model(
     print(f"=== select_and_save_best_model START ===")
     print(f"Number of experiment results: {len(experiment_results)}")
 
-    loaded_results = []
-    for task_id in experiment_results:
-        task = Task.get_task(task_id=task_id)
-        result = task.artifacts["evaluation_result"].get()
-        loaded_results.append(result)
+ 
 
     # Проверяем, что experiment_results содержит словари
     parsed_results = []
