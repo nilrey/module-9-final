@@ -212,6 +212,7 @@ pipe.add_function_step(
         learning_rate=0.1,
         iterations=500
     ),
+    parents=["load_data"],
     function_return=["model_exp1"]
 )
 
@@ -225,6 +226,7 @@ pipe.add_function_step(
         learning_rate=0.05,
         iterations=300
     ),
+    parents=["load_data"],
     function_return=["model_exp2"]
 )
 
@@ -237,6 +239,7 @@ pipe.add_function_step(
         y_val="${load_data.y_val}",
         params={"depth": 4, "learning_rate": 0.1, "iterations": 500}
     ),
+    parents=["train_exp1"],
     function_return=["result_exp1"]
 )
 
@@ -249,6 +252,7 @@ pipe.add_function_step(
         y_val="${load_data.y_val}",
         params={"depth": 6, "learning_rate": 0.05, "iterations": 300}
     ),
+    parents=["train_exp2"],
     function_return=["result_exp2"]
 )
 
@@ -264,7 +268,8 @@ pipe.add_function_step(
         model_key="nil_project/models/ranker.pkl",
         endpoint_url="https://storage.yandexcloud.net"
     ),
-    function_return=["best_info"]
+    function_return=["best_info"],
+    parents=["evaluate_exp1", "evaluate_exp2"]
 )
 
 # Запуск локально
