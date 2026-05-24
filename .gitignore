@@ -19,3 +19,4 @@ item_properties_part2.csv
 .pytest_cache
 .ruff_cache
 *.parquet
+test.csv

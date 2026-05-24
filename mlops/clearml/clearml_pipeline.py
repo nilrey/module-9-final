@@ -21,7 +21,12 @@ def load_data(
     df = pd.read_parquet(
         s3_url,
         storage_options={
-            'client_kwargs': {'endpoint_url': endpoint_url}
+            'client_kwargs': {'endpoint_url': endpoint_url},
+            'config_kwargs': {
+                's3': {
+                    'addressing_style': 'path'
+                }
+            }
         }
     )
     
