@@ -29,7 +29,7 @@ def load_data(train_data_path: str):
         X, y, test_size=0.2, random_state=42, stratify=y
     )
     
-    # Сохраняем данные во временные файлы (JSON)
+    # Сохраняем данные
     temp_dir = tempfile.gettempdir()
     
     X_train_path = os.path.join(temp_dir, "X_train.npy")
@@ -42,33 +42,22 @@ def load_data(train_data_path: str):
     np.save(y_train_path, y_train.values)
     np.save(y_val_path, y_val.values)
     
-    # Сохраняем колонки и метаданные
-    metadata = {
-        "feature_cols": feature_cols,
-        "X_train_shape": X_train.shape,
-        "X_val_shape": X_val.shape
-    }
-    metadata_path = os.path.join(temp_dir, "metadata.json")
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f)
-    
-    print(f"Data saved to temp files")
-    
-    return {
+    # Возвращаем JSON строку со словарем
+    data_paths = {
         "X_train_path": X_train_path,
         "X_val_path": X_val_path,
         "y_train_path": y_train_path,
-        "y_val_path": y_val_path,
-        "metadata_path": metadata_path
+        "y_val_path": y_val_path
     }
-
+    
+    return json.dumps(data_paths) 
 
 # ============================================
 # STEP 2: TRAIN CATBOOST
 # ============================================
 
 def train_catboost(
-    X_path, y_path,
+    data_paths_json: str,  # принимаем JSON строку
     depth: int,
     learning_rate: float,
     iterations: int
@@ -76,12 +65,29 @@ def train_catboost(
     print(f"=== train_catboost START ===")
     print(f"Params: depth={depth}, learning_rate={learning_rate}, iterations={iterations}")
     
-    # Загружаем данные из файлов
+    # Парсим JSON
+    print(f"Received data_paths_json: {data_paths_json}")
+    print(f"Type of data_paths_json: {type(data_paths_json)}")
+    
+    data_paths = json.loads(data_paths_json)
+    print(f"Parsed data_paths: {data_paths}")
+    
+    X_path = data_paths["X_train_path"]
+    y_path = data_paths["y_train_path"]
+    
+    print(f"X_path: {X_path}")
+    print(f"y_path: {y_path}")
+    print(f"X_path exists: {os.path.exists(X_path)}")
+    print(f"y_path exists: {os.path.exists(y_path)}")
+    
+    # Загружаем данные
     X_train = np.load(X_path)
     y_train = np.load(y_path)
     
-    print(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+    print(f"X_train shape: {X_train.shape}, type: {type(X_train)}")
+    print(f"y_train shape: {y_train.shape}, type: {type(y_train)}")
     
+    print("Creating CatBoost model...")
     model = cb.CatBoostClassifier(
         depth=depth,
         learning_rate=learning_rate,
@@ -91,23 +97,34 @@ def train_catboost(
         random_seed=42
     )
     
+    print("Starting training...")
     model.fit(X_train, y_train)
+    print("Training completed")
     
     # Сохраняем модель
     temp_dir = tempfile.gettempdir()
     model_path = os.path.join(temp_dir, f"model_depth{depth}_lr{learning_rate}.pkl")
     joblib.dump(model, model_path)
     print(f"Model saved to: {model_path}")
+    print(f"Model file exists: {os.path.exists(model_path)}")
     
+    print(f"=== train_catboost END ===")
     return model_path
 
-
 # ============================================
-# STEP 3: EVALUATE MODEL
+# STEP 3: EVALUATE MODEL (исправленная)
 # ============================================
 
-def evaluate_model(model_path, X_path, y_path, params_json: str):
+def evaluate_model(model_path, data_paths_json: str, params_json: str):
     print(f"=== evaluate_model START ===")
+    
+    # Парсим пути к данным из JSON
+    data_paths = json.loads(data_paths_json)
+    X_path = data_paths["X_val_path"]
+    y_path = data_paths["y_val_path"]
+    
+    print(f"X_path: {X_path}")
+    print(f"y_path: {y_path}")
     
     # Парсим параметры из JSON
     params = json.loads(params_json)
@@ -116,6 +133,7 @@ def evaluate_model(model_path, X_path, y_path, params_json: str):
     # Загружаем данные
     X_val = np.load(X_path)
     y_val = np.load(y_path)
+    print(f"X_val shape: {X_val.shape}, y_val shape: {y_val.shape}")
     
     # Загружаем модель
     model = joblib.load(model_path)
@@ -136,7 +154,7 @@ def evaluate_model(model_path, X_path, y_path, params_json: str):
         for param_name, param_value in params.items():
             task.get_logger().report_single_value(f"param_{param_name}", param_value)
     
-    # Возвращаем JSON строку
+    print(f"=== evaluate_model END ===")
     return json.dumps(result)
 
 
@@ -182,9 +200,8 @@ def select_and_save_best_model(
         "s3_path": model_s3_path
     })
 
-
 # ============================================
-# PIPELINE CONTROLLER
+# PIPELINE CONTROLLER (исправленный)
 # ============================================
 
 pipe = PipelineController(
@@ -200,7 +217,7 @@ pipe.add_function_step(
     function_kwargs=dict(
         train_data_path="/opt/clearml_data/data_for_training.parquet"
     ),
-    function_return=["data_paths"]
+    function_return=["data_paths_json"]  
 )
 
 # Шаг 2: Обучение моделей
@@ -208,8 +225,7 @@ pipe.add_function_step(
     name="train_exp1",
     function=train_catboost,
     function_kwargs=dict(
-        X_path="${load_data.data_paths.X_train_path}",
-        y_path="${load_data.data_paths.y_train_path}",
+        data_paths_json="${load_data.data_paths_json}",  
         depth=4,
         learning_rate=0.1,
         iterations=500
@@ -222,8 +238,7 @@ pipe.add_function_step(
     name="train_exp2",
     function=train_catboost,
     function_kwargs=dict(
-        X_path="${load_data.data_paths.X_train_path}",
-        y_path="${load_data.data_paths.y_train_path}",
+        data_paths_json="${load_data.data_paths_json}",  
         depth=6,
         learning_rate=0.05,
         iterations=300
@@ -232,15 +247,14 @@ pipe.add_function_step(
     function_return=["model_path_exp2"]
 )
 
-# Шаг 3: Оценка моделей
+# Шаг 3: Оценка моделей (ИСПРАВЛЕНО)
 pipe.add_function_step(
     name="evaluate_exp1",
     function=evaluate_model,
     function_kwargs=dict(
         model_path="${train_exp1.model_path_exp1}",
-        X_path="${load_data.data_paths.X_val_path}",
-        y_path="${load_data.data_paths.y_val_path}",
-        params_json=json.dumps({"depth": 4, "learning_rate": 0.1, "iterations": 500})
+        data_paths_json="${load_data.data_paths_json}",  # передаем JSON строку
+        params_json='{"depth": 4, "learning_rate": 0.1, "iterations": 500}'
     ),
     parents=["train_exp1"],
     function_return=["result_exp1"]
@@ -251,20 +265,19 @@ pipe.add_function_step(
     function=evaluate_model,
     function_kwargs=dict(
         model_path="${train_exp2.model_path_exp2}",
-        X_path="${load_data.data_paths.X_val_path}",
-        y_path="${load_data.data_paths.y_val_path}",
-        params_json=json.dumps({"depth": 6, "learning_rate": 0.05, "iterations": 300})
+        data_paths_json="${load_data.data_paths_json}",  # передаем JSON строку
+        params_json='{"depth": 6, "learning_rate": 0.05, "iterations": 300}'
     ),
     parents=["train_exp2"],
     function_return=["result_exp2"]
 )
 
-# Шаг 4: Выбор лучшей модели
+# Шаг 4: Выбор лучшей модели (ИСПРАВЛЕНО)
 pipe.add_function_step(
     name="select_best",
     function=select_and_save_best_model,
     function_kwargs=dict(
-        experiment_results_json=f'[{ "${evaluate_exp1.result_exp1}", "${evaluate_exp2.result_exp2}" }]',
+        experiment_results_json='[' + "${evaluate_exp1.result_exp1}" + ',' + "${evaluate_exp2.result_exp2}" + ']',
         bucket_name="r-mlops-bucket-12-1-1-22209764",
         model_key="nil_project/models/ranker.pkl",
         endpoint_url="https://storage.yandexcloud.net"
