@@ -4,7 +4,7 @@ import logging
 
 from fastapi import FastAPI
 
-from loaded_models import item_features, ranker
+from src.loaded_models import item_features, ranker
 
 # Возможно надо еще импортировать prometheus, pydantic (схемы)
 # from schemas import PredictPurchaseRequest, PredictPurchaseResponse, ErrorResponse
