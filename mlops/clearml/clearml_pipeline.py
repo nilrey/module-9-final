@@ -4,20 +4,18 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import average_precision_score
 import catboost as cb
 import joblib
-from clearml import PipelineController, OutputModel, Task
+from clearml import PipelineController, Task
 import s3fs
 import os
+import json
+import tempfile
 
-# ============================================
-# STEP 1: LOAD DATA FROM S3
-# ============================================
 
+# STEP 1: LOAD DATA
 def load_data(train_data_path: str):
     print(f"=== load_data START ===")
-    print(f"Local path: {train_data_path}")
     
     df = pd.read_parquet(train_data_path)
-    print(f"DataFrame loaded: {df.shape[0]} rows, {df.shape[1]} cols")
     
     feature_cols = [
         "views", "purchases", "ctr", "hour", "weekday", "categoryid", "available"
@@ -28,23 +26,62 @@ def load_data(train_data_path: str):
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
-    print(f"Train size: {len(X_train)}, Val size: {len(X_val)}")
-    print("=== load_data END ===")
     
-    return X_train, X_val, y_train, y_val
+    # Сохраняем данные
+    temp_dir = tempfile.gettempdir()
+    
+    X_train_path = os.path.join(temp_dir, "X_train.npy")
+    X_val_path = os.path.join(temp_dir, "X_val.npy")
+    y_train_path = os.path.join(temp_dir, "y_train.npy")
+    y_val_path = os.path.join(temp_dir, "y_val.npy")
+    
+    np.save(X_train_path, X_train.values)
+    np.save(X_val_path, X_val.values)
+    np.save(y_train_path, y_train.values)
+    np.save(y_val_path, y_val.values)
+    
+    # Возвращаем JSON строку со словарем
+    data_paths = {
+        "X_train_path": X_train_path,
+        "X_val_path": X_val_path,
+        "y_train_path": y_train_path,
+        "y_val_path": y_val_path
+    }
+    
+    return json.dumps(data_paths) 
 
-# ============================================
-# STEP 2: TRAIN CATBOOST WITH SPECIFIC PARAMS
-# ============================================
+
+# STEP 2: НАЧИНАЕМ ОБУЧЕНИЕ
 def train_catboost(
-    X_train, y_train,
+    data_paths_json: str,  # принимаем JSON строку (т.к. передача через внутренние переменные не происходт для локального запуска)
     depth: int,
     learning_rate: float,
     iterations: int
 ):
     print(f"=== train_catboost START ===")
     print(f"Params: depth={depth}, learning_rate={learning_rate}, iterations={iterations}")
-    print(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+    
+    # Парсим JSON
+    print(f"Received data_paths_json: {data_paths_json}")
+    print(f"Type of data_paths_json: {type(data_paths_json)}")
+    
+    data_paths = json.loads(data_paths_json)
+    print(f"Parsed data_paths: {data_paths}")
+    
+    X_path = data_paths["X_train_path"]
+    y_path = data_paths["y_train_path"]
+    
+    print(f"X_path: {X_path}")
+    print(f"y_path: {y_path}")
+    print(f"X_path exists: {os.path.exists(X_path)}")
+    print(f"y_path exists: {os.path.exists(y_path)}")
+    
+    # Загружаем данные
+    X_train = np.load(X_path)
+    y_train = np.load(y_path)
+    
+    print(f"X_train shape: {X_train.shape}, type: {type(X_train)}")
+    print(f"y_train shape: {y_train.shape}, type: {type(y_train)}")
     
     print("Creating CatBoost model...")
     model = cb.CatBoostClassifier(
@@ -59,319 +96,216 @@ def train_catboost(
     print("Starting training...")
     model.fit(X_train, y_train)
     print("Training completed")
+    
+    # Сохраняем модель
+    temp_dir = tempfile.gettempdir()
+    model_path = os.path.join(temp_dir, f"model_depth{depth}_lr{learning_rate}.pkl")
+    joblib.dump(model, model_path)
+    print(f"Model saved to: {model_path}")
+    print(f"Model file exists: {os.path.exists(model_path)}")
+    
     print(f"=== train_catboost END ===")
-    
-    return model
+    return model_path
 
 
-# ============================================
-# STEP 3: EVALUATE MODEL (PR-AUC)
-# ============================================
-def evaluate_model(model, X_val, y_val, params: dict):
+# STEP 3: считаем PR_AUC
+def evaluate_model(model_path, data_paths_json: str, params_json: str, output_file: str = None):
     print(f"=== evaluate_model START ===")
+    
+    # Парсим пути к данным из JSON
+    data_paths = json.loads(data_paths_json)
+    X_path = data_paths["X_val_path"]
+    y_path = data_paths["y_val_path"]
+    
+    # Парсим параметры из JSON
+    params = json.loads(params_json)
     print(f"Params: {params}")
-    print(f"X_val shape: {X_val.shape}, y_val shape: {y_val.shape}")
     
-    print("Getting prediction probabilities...")
+    # Загружаем данные
+    X_val = np.load(X_path)
+    y_val = np.load(y_path)
+    
+    # Загружаем модель
+    model = joblib.load(model_path)
+    
     y_pred_proba = model.predict_proba(X_val)[:, 1]
-    print(f"Predictions ready, shape: {y_pred_proba.shape}")
-    
-    print("Calculating PR-AUC...")
     pr_auc = average_precision_score(y_val, y_pred_proba)
     print(f"PR-AUC = {pr_auc:.6f}")
     
+    result = {
+        "pr_auc": pr_auc,
+        "model_path": model_path,
+        "params": params
+    }
+    
+    # Сохраняем результат во временный файл
+    if output_file is None:
+        temp_dir = tempfile.gettempdir()
+        output_file = os.path.join(temp_dir, f"result_{params['depth']}_{params['learning_rate']}.json")
+    
+    with open(output_file, "w") as f:
+        json.dump(result, f)
+    print(f"Result saved to: {output_file}")
+    
     task = Task.current_task()
     if task:
-        print("Reporting metrics to ClearML...")
         task.get_logger().report_scalar("metrics", "pr_auc", value=pr_auc, iteration=0)
         for param_name, param_value in params.items():
             task.get_logger().report_single_value(f"param_{param_name}", param_value)
-    else:
-        print("WARNING: No current ClearML task found")
     
     print(f"=== evaluate_model END ===")
-    
-    return {
-        "pr_auc": pr_auc,
-        "model": model,
-        "params": params
-    }
+    return output_file  # возвращаем путь к файлу 
 
 
-# ============================================
-# STEP 4: SELECT BEST MODEL BY PR-AUC
-# ============================================
+
+# STEP 4: ВЫБОР ЛУЧШЕЙ МОДЕЛИ
 def select_and_save_best_model(
-    experiment_results,
+    result_files_json: str,  # JSON массив путей к файлам
     bucket_name: str,
     model_key: str,
     endpoint_url: str
 ):
     print(f"=== select_and_save_best_model START ===")
-    print(f"Number of experiment results: {len(experiment_results)}")
-    for i, res in enumerate(experiment_results):
-        print(f"  Experiment {i+1}: PR-AUC = {res.get('pr_auc', 'N/A')}")
     
-    print("Selecting best model by PR-AUC...")
+    # Парсим пути к файлам
+    result_files = json.loads(result_files_json)
+    print(f"Result files: {result_files}")
+    
+    # Загружаем результаты из файлов
+    experiment_results = []
+    for file_path in result_files:
+        with open(file_path, "r") as f:
+            result = json.load(f)
+            experiment_results.append(result)
+            print(f"Loaded result: PR-AUC = {result['pr_auc']:.6f}")
+    
+    # Выбираем лучшую модель по PR-AUC
     best_result = max(experiment_results, key=lambda x: x["pr_auc"])
-    best_model = best_result["model"]
     best_pr_auc = best_result["pr_auc"]
     best_params = best_result["params"]
+    best_model_path = best_result["model_path"]
     
     print(f"Best model PR-AUC = {best_pr_auc:.6f}")
     print(f"Best params: {best_params}")
     
-    print(f"Connecting to S3 at {endpoint_url}...")
-    fs = s3fs.S3FileSystem(
-        client_kwargs={"endpoint_url": endpoint_url}
-    )
+    # Загружаем лучшую модель
+    best_model = joblib.load(best_model_path)
     
-    model_path = f"s3://{bucket_name}/{model_key}"
-    print(f"Saving model to {model_path}...")
-    with fs.open(model_path, "wb") as f:
+    # Сохраняем в S3
+    fs = s3fs.S3FileSystem(client_kwargs={"endpoint_url": endpoint_url})
+    model_s3_path = f"s3://{bucket_name}/{model_key}"
+    
+    with fs.open(model_s3_path, "wb") as f:
         joblib.dump(best_model, f)
-    print("Model saved to S3")
+    print(f"Model saved to S3: {model_s3_path}")
     
-    task = Task.current_task()
-    if task:
-        print("Registering model in ClearML...")
-        output_model = OutputModel(
-            task=task,
-            framework="CatBoost",
-            name="catboost_ranker",
-            comment=f"Best model with PR-AUC = {best_pr_auc:.6f}",
-            tags=["best_model", "catboost"]
-        )
-        
-        temp_path = "/tmp/best_catboost_model.pkl"
-        print(f"Saving temp copy to {temp_path}...")
-        joblib.dump(best_model, temp_path, compress=True)
-        output_model.update_weights(temp_path)
-        os.remove(temp_path)
-        print(f"Model registered with ID: {output_model.id}")
-    else:
-        print("WARNING: No current ClearML task found, model not registered")
+    # Очищаем временные файлы
+    for file_path in result_files:
+        try:
+            os.remove(file_path)
+            print(f"Cleaned up: {file_path}")
+        except:
+            pass
     
     print(f"=== select_and_save_best_model END ===")
     
-    return {
+    return json.dumps({
         "best_pr_auc": best_pr_auc,
         "best_params": best_params,
-        "s3_path": model_path,
-        "clearml_model_id": output_model.id if task else None
-    }
+        "s3_path": model_s3_path
+    })
 
 
-# ============================================
-# CREATE PIPELINE
-# ============================================
-def create_pipeline():
-    print("=== create_pipeline START ===")
-    
-    pipe = PipelineController(
-        name="CatBoost Hyperparameter Tuning",
-        project="mlops",
-        version="1.0.0",
-        add_pipeline_tags=True
-    )
-    
-    pipe.set_default_execution_queue(default_execution_queue="default")
-    print("Pipeline controller created, default queue set to 'default'")
-    
-    # Pipeline parameters
-    pipe.add_parameter(
-        name="train_data_path",
-        default="nil_project/processed_data/data_for_training.parquet"
-    )
-    pipe.add_parameter(
-        name="bucket_name",
-        default="r-mlops-bucket-12-1-1-22209764"
-    )
-    pipe.add_parameter(
-        name="model_key",
-        default="nil_project/models/ranker.pkl"
-    )
-    pipe.add_parameter(
-        name="endpoint_url",
-        default="https://storage.yandexcloud.net"
-    )
-    print("Pipeline parameters added")
-    
-    # Step 1: Load data
-    
-    # print("Adding step: load_data")
-    # pipe.add_function_step(
-    #     name="load_data",
-    #     function=load_data,
-    #     function_kwargs=dict(
-    #         train_data_path="nil_project/processed_data/data_for_training.parquet",
-    #         bucket_name="r-mlops-bucket-12-1-1-22209764",
-    #         endpoint_url="https://storage.yandexcloud.net"
-    #     ),
-    #     function_return=["X_train", "X_val", "y_train", "y_val"],
-    #     packages=[
-    #         "clearml[s3]==2.0.2",
-    #         "pandas==2.2.2",
-    #         "scikit-learn==1.5.1",
-    #         "catboost==1.2.8",
-    #         "joblib==1.5.2",
-    #         "numpy==1.26.3",
-    #         "s3fs==2024.10.0",
-    #         "pyarrow==22.0.0"
-    #     ]
-    # )
-    print("Adding step: load_data")
-    pipe.add_function_step(
-        name="load_data",
-        function=load_data,
-        function_kwargs=dict(
-            train_data_path="/opt/clearml_data/data_for_training.parquet"
-        ),
-        function_return=["X_train", "X_val", "y_train", "y_val"],
-        packages=["pandas==2.2.2", "scikit-learn==1.5.1", "numpy==1.26.3", "pyarrow==22.0.0"]
-    )    
+
+# PIPELINE CONTROLLER
 
 
-    # Experiment 1
-    print("Adding step: train_exp1")
-    pipe.add_function_step(
-        name="train_exp1",
-        function=train_catboost,
-        function_kwargs=dict(
-            X_train="${load_data.X_train}",
-            y_train="${load_data.y_train}",
-            depth=4,
-            learning_rate=0.1,
-            iterations=500
-        ),
-        function_return=["model_exp1"],
-        packages=[
-            "clearml[s3]==2.0.2",
-            "pandas==2.2.2",
-            "scikit-learn==1.5.1",
-            "catboost==1.2.8",
-            "joblib==1.5.2",
-            "numpy==1.26.3",
-            "s3fs==2024.10.0",
-            "pyarrow==22.0.0"
-        ],
-        parents=["load_data"]
-    )
-    
-    # Experiment 2
-    print("Adding step: train_exp2")
-    pipe.add_function_step(
-        name="train_exp2",
-        function=train_catboost,
-        function_kwargs=dict(
-            X_train="${load_data.X_train}",
-            y_train="${load_data.y_train}",
-            depth=6,
-            learning_rate=0.05,
-            iterations=300
-        ),
-        function_return=["model_exp2"],
-        packages=[
-            "clearml[s3]==2.0.2",
-            "pandas==2.2.2",
-            "scikit-learn==1.5.1",
-            "catboost==1.2.8",
-            "joblib==1.5.2",
-            "numpy==1.26.3",
-            "s3fs==2024.10.0",
-            "pyarrow==22.0.0"
-        ],
-        parents=["load_data"]
-    )
-    
-    # Evaluate Experiment 1
-    print("Adding step: evaluate_exp1")
-    pipe.add_function_step(
-        name="evaluate_exp1",
-        function=evaluate_model,
-        function_kwargs=dict(
-            model="${train_exp1.model_exp1}",
-            X_val="${load_data.X_val}",
-            y_val="${load_data.y_val}",
-            params={"depth": 4, "learning_rate": 0.1, "iterations": 500}
-        ),
-        function_return=["result_exp1"],
-        packages=[
-            "clearml[s3]==2.0.2",
-            "pandas==2.2.2",
-            "scikit-learn==1.5.1",
-            "catboost==1.2.8",
-            "joblib==1.5.2",
-            "numpy==1.26.3",
-            "s3fs==2024.10.0",
-            "pyarrow==22.0.0"
-        ],
-        parents=["train_exp1"]
-    )
-    
-    # Evaluate Experiment 2
-    print("Adding step: evaluate_exp2")
-    pipe.add_function_step(
-        name="evaluate_exp2",
-        function=evaluate_model,
-        function_kwargs=dict(
-            model="${train_exp2.model_exp2}",
-            X_val="${load_data.X_val}",
-            y_val="${load_data.y_val}",
-            params={"depth": 6, "learning_rate": 0.05, "iterations": 300}
-        ),
-        function_return=["result_exp2"],
-        packages=[
-            "clearml[s3]==2.0.2",
-            "pandas==2.2.2",
-            "scikit-learn==1.5.1",
-            "catboost==1.2.8",
-            "joblib==1.5.2",
-            "numpy==1.26.3",
-            "s3fs==2024.10.0",
-            "pyarrow==22.0.0"
-        ],
-        parents=["train_exp2"]
-    )
-    
-    # Select and save best model
-    print("Adding step: select_best")
-    pipe.add_function_step(
-        name="select_best",
-        function=select_and_save_best_model,
-        function_kwargs=dict(
-            experiment_results=[
-                "${evaluate_exp1.result_exp1}",
-                "${evaluate_exp2.result_exp2}"
-            ],
-            train_data_path="nil_project/processed_data/data_for_training.parquet",
-            bucket_name="r-mlops-bucket-12-1-1-22209764",
-            endpoint_url="https://storage.yandexcloud.net"
-        ),
-        function_return=["best_info"],
-        packages=[
-            "clearml[s3]==2.0.2",
-            "pandas==2.2.2",
-            "scikit-learn==1.5.1",
-            "catboost==1.2.8",
-            "joblib==1.5.2",
-            "numpy==1.26.3",
-            "s3fs==2024.10.0",
-            "pyarrow==22.0.0"
-        ],
-        parents=["evaluate_exp1", "evaluate_exp2"]
-    )
-    
-    print("=== create_pipeline END ===")
-    return pipe
+pipe = PipelineController(
+    name="CatBoost Hyperparameter Tuning",
+    project="mlops",
+    version="1.0.0"
+)
 
+# Шаг 1: Загрузка данных
+pipe.add_function_step(
+    name="load_data",
+    function=load_data,
+    function_kwargs=dict(
+        train_data_path="/opt/clearml_data/data_for_training.parquet"
+    ),
+    function_return=["data_paths_json"]  
+)
 
+# Шаг 2: Обучение моделей
+pipe.add_function_step(
+    name="train_exp1",
+    function=train_catboost,
+    function_kwargs=dict(
+        data_paths_json="${load_data.data_paths_json}",  
+        depth=4,
+        learning_rate=0.1,
+        iterations=500
+    ),
+    parents=["load_data"],
+    function_return=["model_path_exp1"]
+)
+
+pipe.add_function_step(
+    name="train_exp2",
+    function=train_catboost,
+    function_kwargs=dict(
+        data_paths_json="${load_data.data_paths_json}",  
+        depth=6,
+        learning_rate=0.05,
+        iterations=300
+    ),
+    parents=["load_data"],
+    function_return=["model_path_exp2"]
+)
+
+# Шаг 3: Оценка моделей (возвращают пути к файлам)
+pipe.add_function_step(
+    name="evaluate_exp1",
+    function=evaluate_model,
+    function_kwargs=dict(
+        model_path="${train_exp1.model_path_exp1}",
+        data_paths_json="${load_data.data_paths_json}",
+        params_json='{"depth": 4, "learning_rate": 0.1, "iterations": 500}',
+        output_file="/tmp/result_exp1.json"  # фиксированный путь
+    ),
+    parents=["train_exp1"],
+    function_return=["result_file_exp1"]
+)
+
+pipe.add_function_step(
+    name="evaluate_exp2",
+    function=evaluate_model,
+    function_kwargs=dict(
+        model_path="${train_exp2.model_path_exp2}",
+        data_paths_json="${load_data.data_paths_json}",
+        params_json='{"depth": 6, "learning_rate": 0.05, "iterations": 300}',
+        output_file="/tmp/result_exp2.json"  # фиксированный путь
+    ),
+    parents=["train_exp2"],
+    function_return=["result_file_exp2"]
+)
+
+# Шаг 4: Выбор лучшей модели (передаем пути как JSON)
+pipe.add_function_step(
+    name="select_best",
+    function=select_and_save_best_model,
+    function_kwargs=dict(
+        result_files_json='["/tmp/result_exp1.json", "/tmp/result_exp2.json"]',
+        bucket_name="r-mlops-bucket-12-1-1-22209764",
+        model_key="nil_project/models/ranker.pkl",
+        endpoint_url="https://storage.yandexcloud.net"
+    ),
+    parents=["evaluate_exp1", "evaluate_exp2"],
+    function_return=["best_info"]
+)
+
+# Запуск
 if __name__ == "__main__":
-    print("ClearML Environment:")
-    print(f"  CLEARML_API_HOST: {os.environ.get('CLEARML_API_HOST', 'NOT SET')}")
-    print(f"  BUCKET_NAME: {os.environ.get('BUCKET_NAME', 'r-mlops-bucket-12-1-1-22209764')}")
-    
-    pipe = create_pipeline()
-    print("Starting pipeline...")
-    pipe.start(queue="default")
-    print("Pipeline submitted successfully")
+    print("Pipeline start")
+    pipe.start_locally(True)
+    print("Pipeline finished")
