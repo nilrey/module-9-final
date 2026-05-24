@@ -264,7 +264,7 @@ pipe.add_function_step(
     name="select_best",
     function=select_and_save_best_model,
     function_kwargs=dict(
-        experiment_results_json=f'[{ "${evaluate_exp1.result_exp1}", "${evaluate_exp2.result_exp2}" ]',
+        experiment_results_json=f'[{ "${evaluate_exp1.result_exp1}", "${evaluate_exp2.result_exp2}" }]',
         bucket_name="r-mlops-bucket-12-1-1-22209764",
         model_key="nil_project/models/ranker.pkl",
         endpoint_url="https://storage.yandexcloud.net"
