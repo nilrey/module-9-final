@@ -88,5 +88,5 @@ pipe.add_function_step(
 # Запуск локально (без агента)
 if __name__ == "__main__":
     print("Running pipeline locally...")
-    pipe.run_locally()
+    pipe.start_locally(True)
     print("Pipeline finished")
