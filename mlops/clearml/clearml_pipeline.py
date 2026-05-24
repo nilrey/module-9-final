@@ -228,9 +228,9 @@ def create_pipeline():
         name="load_data",
         function=load_data,
         function_kwargs=dict(
-            train_data_path="${pipeline.train_data_path}",
-            bucket_name="${pipeline.bucket_name}",
-            endpoint_url="${pipeline.endpoint_url}"
+            train_data_path="nil_project/processed_data/data_for_training.parquet",
+            bucket_name="r-mlops-bucket-12-1-1-22209764",
+            endpoint_url="https://storage.yandexcloud.net"
         ),
         function_return=["X_train", "X_val", "y_train", "y_val"],
         packages=[
