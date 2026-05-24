@@ -6,7 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
-
+COPY src/loaded_models.py ./
 ENV PYTHONPATH=/app
 
 EXPOSE 8000
