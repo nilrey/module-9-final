@@ -58,7 +58,7 @@ def train_catboost(
     learning_rate: float,
     iterations: int
 ):
-    print(f"=== train_catboost START ===")
+    print(f"Start train_catboost")
     print(f"Params: depth={depth}, learning_rate={learning_rate}, iterations={iterations}")
     
     # Парсим JSON
@@ -104,13 +104,13 @@ def train_catboost(
     print(f"Model saved to: {model_path}")
     print(f"Model file exists: {os.path.exists(model_path)}")
     
-    print(f"=== train_catboost END ===")
+    print(f"Finish train_catboost success")
     return model_path
 
 
 # STEP 3: считаем PR_AUC
 def evaluate_model(model_path, data_paths_json: str, params_json: str, output_file: str = None):
-    print(f"=== evaluate_model START ===")
+    print(f"Start evaluate_model")
     
     # Парсим пути к данным из JSON
     data_paths = json.loads(data_paths_json)
@@ -153,19 +153,19 @@ def evaluate_model(model_path, data_paths_json: str, params_json: str, output_fi
         for param_name, param_value in params.items():
             task.get_logger().report_single_value(f"param_{param_name}", param_value)
     
-    print(f"=== evaluate_model END ===")
+    print(f"Finished evaluate_model success")
     return output_file  # возвращаем путь к файлу 
 
 
 
 # STEP 4: ВЫБОР ЛУЧШЕЙ МОДЕЛИ
-def select_and_save_best_model(
-    result_files_json: str,  # JSON массив путей к файлам
+def save_best_model(
+    result_files_json: str,
     bucket_name: str,
     model_key: str,
     endpoint_url: str
 ):
-    print(f"=== select_and_save_best_model START ===")
+    print(f"Srart save_best_model ")
     
     # Парсим пути к файлам
     result_files = json.loads(result_files_json)
@@ -207,7 +207,7 @@ def select_and_save_best_model(
         except:
             pass
     
-    print(f"=== select_and_save_best_model END ===")
+    print(f"Finished save_best_model success")
     
     return json.dumps({
         "best_pr_auc": best_pr_auc,
@@ -218,15 +218,13 @@ def select_and_save_best_model(
 
 
 # PIPELINE CONTROLLER
-
-
 pipe = PipelineController(
     name="CatBoost Hyperparameter Tuning",
     project="mlops",
     version="1.0.0"
 )
 
-# Шаг 1: Загрузка данных
+# Загрузка данных
 pipe.add_function_step(
     name="load_data",
     function=load_data,
@@ -236,7 +234,7 @@ pipe.add_function_step(
     function_return=["data_paths_json"]  
 )
 
-# Шаг 2: Обучение моделей
+# Параллельное обучение моделей с разными гиперпараметрами
 pipe.add_function_step(
     name="train_exp1",
     function=train_catboost,
@@ -263,7 +261,7 @@ pipe.add_function_step(
     function_return=["model_path_exp2"]
 )
 
-# Шаг 3: Оценка моделей (возвращают пути к файлам)
+# Оценка моделей
 pipe.add_function_step(
     name="evaluate_exp1",
     function=evaluate_model,
@@ -290,10 +288,10 @@ pipe.add_function_step(
     function_return=["result_file_exp2"]
 )
 
-# Шаг 4: Выбор лучшей модели (передаем пути как JSON)
+# Выбор лучшей модели
 pipe.add_function_step(
     name="select_best",
-    function=select_and_save_best_model,
+    function=save_best_model,
     function_kwargs=dict(
         result_files_json='["/tmp/result_exp1.json", "/tmp/result_exp2.json"]',
         bucket_name="r-mlops-bucket-12-1-1-22209764",
@@ -304,7 +302,7 @@ pipe.add_function_step(
     function_return=["best_info"]
 )
 
-# Запуск
+
 if __name__ == "__main__":
     print("Pipeline start")
     pipe.start_locally(True)
