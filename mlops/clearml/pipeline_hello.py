@@ -9,6 +9,8 @@ pipe = PipelineController(
     version="1.0.0"
 )
 
+pipe.set_default_execution_queue("default")
+
 pipe.add_function_step(
     name="hello",
     function=hello_world,
