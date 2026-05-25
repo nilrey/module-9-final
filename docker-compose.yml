@@ -7,8 +7,6 @@ services:
     ports:
       - "32000:8000"
     volumes:
-      - ./src/item_features.parquet:/app/src/item_features.parquet
-      - ./src/ranker.pkl:/app/src/ranker.pkl
       - ./data:/app/data
     environment:
       - PYTHONPATH=/app
