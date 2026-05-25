@@ -20,6 +20,17 @@ def test_version():
     assert "version" in response.json()
 
 def test_predict_purchase():
-    response = client.get("/predict_purchase", params={"itemid": 356475, "hour": 14, "weekday": 3})
+    response = client.post(
+        "/predict_purchase",
+        json={"itemid": 356475, "hour": 14, "weekday": 3}
+    )
     assert response.status_code == 200
     assert "purchase_probability" in response.json()
+
+def test_predict_purchase_item_not_found():
+    response = client.post(
+        "/predict_purchase",
+        json={"itemid": 999999999, "hour": 14, "weekday": 3}
+    )
+    assert response.status_code == 404
+    assert response.json()["error"] == "item not found"
