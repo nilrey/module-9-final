@@ -51,19 +51,15 @@ pytest_tests:
 
 docker_build:
   stage: build
-  image: docker:24.0.5-dind-rootless
-  services:
-    - docker:24.0.5-dind-rootless
-  variables:
-    DOCKER_HOST: tcp://localhost:2376
-    DOCKER_TLS_CERTDIR: "/certs"
-  before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  image: gcr.io/kaniko-project/executor:debug
   script:
-    - docker build --build-arg BUILDKIT_INLINE_CACHE=1 -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA .
-    - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA $CI_REGISTRY_IMAGE:latest
-    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
-    - docker push $CI_REGISTRY_IMAGE:latest
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}"
+      --dockerfile="${CI_PROJECT_DIR}/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}:latest"
+      --cache=true
   only:
     - main
 
@@ -79,11 +75,13 @@ deploy_to_vm:
   script:
     - ssh -o StrictHostKeyChecking=no $VM_USER@$VM_IP "
         docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
-        cd /opt/recommender-service &&
+        cd /opt/recommender &&
+        docker-compose down &&
         docker-compose pull &&
-        docker-compose up -d &&
-        docker system prune -f
+        docker-compose up -d
       "
   only:
     - main
   when: manual
+
+  
